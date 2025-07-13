@@ -3,7 +3,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const bodyParser = require("body-parser");
 
-const envelopes = [];
+let envelopes = [];
 
 app.use(bodyParser.json());
 
@@ -39,7 +39,29 @@ app.post("/envelopes", (req, res) => {
 app.post("/envelopes/:id", (req, res) => {
   const id = Number(req.params.id);
   const envelope = envelopes.find((envelope) => envelope.id === id);
-  const updatedEnvelope = req.body;
+  const { name, amount } = req.body;
+  if (!envelope) {
+    return res.status(404).json({ error: "Envelope not found" });
+  }
+  if (!amount || !name) {
+    return res.status(404).json({ error: "Amount or name is not found" });
+  }
+  if (envelope.amount < amount) {
+    return res.status(404).json({ error: "Insufficient amount" });
+  }
+  envelope.name = name;
+  envelope.amount -= amount;
+  res.status(200).json(envelope);
+});
+
+app.delete("/envelopes/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const found = envelopes.some((envelope) => envelope.id === id);
+  if (!found) {
+    return res.status(404).json({ error: "Envelope not found" });
+  }
+  envelopes = envelopes.filter((envelope) => envelope.id !== id);
+  res.status(204).send();
 });
 
 app.listen(PORT, () => {
