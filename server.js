@@ -3,9 +3,19 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const bodyParser = require("body-parser");
-const pool = require("./db");
-
-let envelopes = [];
+const {
+  getAllEnvelopes,
+  getEnvelopeById,
+  createEnvelope,
+  updateEnvelope,
+  deleteEnvelope,
+  transferEnvelope,
+  createTransaction,
+  getAllTransactions,
+  getTransactionsByEnvelope,
+  updateTransaction,
+  deleteTransaction,
+} = require("./db");
 
 app.use(bodyParser.json());
 
@@ -13,50 +23,61 @@ app.get("/", (req, res) => {
   res.send("Hello, World!");
 });
 
-app.get("/envelopes", (req, res) => {
-  res.json(envelopes);
-});
-
-app.get("/envelopes/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const envelope = envelopes.find((envelope) => {
-    return envelope.id === id;
-  });
-  if (!envelope) {
-    return res.status(404).json({ error: "Envelope not found" });
+app.get("/envelopes", async (req, res) => {
+  try {
+    const envelopes = await getAllEnvelopes();
+    res.json(envelopes);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
   }
-  res.status(200).json(envelope);
 });
 
-app.post("/envelopes", (req, res) => {
+app.get("/envelopes/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const envelope = await getEnvelopeById(id);
+    if (!envelope) {
+      return res.status(404).json({ error: "Envelope not found" });
+    }
+    res.status(200).json(envelope);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.post("/envelopes", async (req, res) => {
   const { name, amount } = req.body;
   if (!name || !amount) {
     return res.status(400).json({ error: "Name and amount are required" });
   }
-  const envelope = { id: envelopes.length + 1, name, amount };
-  envelopes.push(envelope);
-  res.status(201).json(envelope);
+  try {
+    const envelope = await createEnvelope(name, amount);
+    res.status(201).json(envelope);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-app.post("/envelopes/:id", (req, res) => {
+app.post("/envelopes/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const envelope = envelopes.find((envelope) => envelope.id === id);
   const { name, amount } = req.body;
-  if (!envelope) {
-    return res.status(404).json({ error: "Envelope not found" });
-  }
   if (!amount || !name) {
     return res.status(404).json({ error: "Amount or name is not found" });
   }
-  if (envelope.amount < amount) {
-    return res.status(404).json({ error: "Insufficient amount" });
+  try {
+    const envelope = await updateEnvelope(id, name, amount);
+    if (!envelope) {
+      return res
+        .status(404)
+        .json({ error: "Envelope not found or insufficient amount" });
+    }
+    res.status(200).json(envelope);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
   }
-  envelope.name = name;
-  envelope.amount -= amount;
-  res.status(200).json(envelope);
 });
 
-app.post("/envelopes/transfer/:from/:to", (req, res) => {
+app.post("/envelopes/transfer/:from/:to", async (req, res) => {
   const fromId = Number(req.params.from);
   const toId = Number(req.params.to);
   const { amount } = req.body;
@@ -65,29 +86,95 @@ app.post("/envelopes/transfer/:from/:to", (req, res) => {
       .status(400)
       .json({ error: "A positive amount is required to transfer." });
   }
-  const envelopeFrom = envelopes.find((envelope) => envelope.id === fromId);
-  const envelopeTo = envelopes.find((envelope) => envelope.id === toId);
-  if (!envelopeFrom || !envelopeTo) {
-    return res.status(404).json({ error: "Envelope(s) not found" });
+  try {
+    const result = await transferEnvelope(fromId, toId, amount);
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.status(200).json({ message: "Transfer successful" });
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
   }
-  if (envelopeFrom.amount < amount) {
-    return res
-      .status(400)
-      .json({ error: "Insufficient funds in source envelope." });
-  }
-  envelopeFrom.amount -= amount;
-  envelopeTo.amount += amount;
-  res.status(200).json({ from: envelopeFrom, to: envelopeTo });
 });
 
-app.delete("/envelopes/:id", (req, res) => {
+app.delete("/envelopes/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const found = envelopes.some((envelope) => envelope.id === id);
-  if (!found) {
-    return res.status(404).json({ error: "Envelope not found" });
+  try {
+    const envelope = await deleteEnvelope(id);
+    if (!envelope) {
+      return res.status(404).json({ error: "Envelope not found" });
+    }
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
   }
-  envelopes = envelopes.filter((envelope) => envelope.id !== id);
-  res.status(204).send();
+});
+
+app.post("/envelopes/:id/transactions", async (req, res) => {
+  const envelopes_id = Number(req.params.id);
+  const date = new Date().toISOString().split("T")[0];
+  const { amount, recipient } = req.body;
+  try {
+    const transaction = await createTransaction(
+      envelopes_id,
+      date,
+      amount,
+      recipient
+    );
+    if (!transaction) {
+      return res.status(404).json({ error: "Envelope not found" });
+    }
+    res.status(201).json(transaction);
+  } catch (err) {
+    console.error("Failed to create transaction: ", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.get("/transactions", async (req, res) => {
+  try {
+    const transactions = await getAllTransactions();
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.get("/envelopes/:id/transactions", async (req, res) => {
+  const envelopes_id = Number(req.params.id);
+  try {
+    const transactions = await getTransactionsByEnvelope(envelopes_id);
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.put("/transactions/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { date, amount, recipient } = req.body;
+  try {
+    const updated = await updateTransaction(id, date, amount, recipient);
+    if (!updated || updated.length === 0) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+    res.status(200).json(updated[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.delete("/transactions/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const deleted = await deleteTransaction(id);
+    if (!deleted || deleted.length === 0) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
 app.listen(PORT, () => {
