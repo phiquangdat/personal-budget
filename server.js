@@ -54,6 +54,30 @@ app.post("/envelopes/:id", (req, res) => {
   res.status(200).json(envelope);
 });
 
+app.post("/envelopes/transfer/:from/:to", (req, res) => {
+  const fromId = Number(req.params.from);
+  const toId = Number(req.params.to);
+  const { amount } = req.body;
+  if (typeof amount !== "number" || amount <= 0) {
+    return res
+      .status(400)
+      .json({ error: "A positive amount is required to transfer." });
+  }
+  const envelopeFrom = envelopes.find((envelope) => envelope.id === fromId);
+  const envelopeTo = envelopes.find((envelope) => envelope.id === toId);
+  if (!envelopeFrom || !envelopeTo) {
+    return res.status(404).json({ error: "Envelope(s) not found" });
+  }
+  if (envelopeFrom.amount < amount) {
+    return res
+      .status(400)
+      .json({ error: "Insufficient funds in source envelope." });
+  }
+  envelopeFrom.amount -= amount;
+  envelopeTo.amount += amount;
+  res.status(200).json({ from: envelopeFrom, to: envelopeTo });
+});
+
 app.delete("/envelopes/:id", (req, res) => {
   const id = Number(req.params.id);
   const found = envelopes.some((envelope) => envelope.id === id);
